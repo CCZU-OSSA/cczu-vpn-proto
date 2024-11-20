@@ -2,10 +2,22 @@ use std::ffi::{c_char, c_int};
 
 use cczuni::impls::services::webvpn::WebVPNService;
 
-/// If Success, return true.
+/// if success, return true.
 #[no_mangle]
 pub extern "C" fn start_service(user: *const c_char, password: *const c_char) -> bool {
     false
+}
+
+/// maybe need size and packet
+#[no_mangle]
+pub extern "C" fn send_packet() {
+    todo!()
+}
+
+/// no sure should use cint/cll
+#[no_mangle]
+pub extern "C" fn receive_packet() {
+    todo!()
 }
 
 #[no_mangle]
