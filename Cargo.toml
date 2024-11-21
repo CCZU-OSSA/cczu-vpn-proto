@@ -8,5 +8,5 @@ cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", d
 tokio = { version = "*" }
 
 [lib]
-name = "cczuvonproto"
+name = "cczuvpnproto"
 crate-type = ["lib", "cdylib", "staticlib"]
