@@ -64,10 +64,10 @@ jobs:
       - name: Upload Release
         if: ${{ matrix.target }} == 'ubuntu-latest'
         run: |
-          find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+          cd target/${{ matrix.target }}/release
+          find . -name "*.so" | while read file; do
             mv "$file" "${{ matrix.target }}_$file"
           done
-
-          find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+          find . -name "*.so" | while read file; do
             gh release upload ${{ env.NIGHTLY_TAG }} "$file" --clobber
           done
