@@ -21,7 +21,7 @@ pub extern "C" fn receive_packet() {
 }
 
 #[no_mangle]
-pub extern "C" fn services_available() -> bool {
+pub extern "C" fn service_available() -> bool {
     false
 }
 

@@ -1,0 +1,64 @@
+name: Nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 22 * * *" # 每天 06:15 UTC+8 自动构建
+
+env:
+  NIGHTLY_TAG: pre-release
+
+jobs:
+  update-tag:
+    name: Update tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Env
+        run: |
+          echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
+          echo "CURRENT_GIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Update Tag
+        uses: greenhat616/update-tag@v1
+        with:
+          tag_name: ${{ env.NIGHTLY_TAG }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create release body
+        run: |
+          cat > release.txt << 'EOF'
+          ## CCZU VPN Proto Nightly Build
+          Release created at  ${{ env.BUILDTIME }}.
+          Daily build of **CCZU VPN Proto** on *main* branch.
+          EOF
+  build:
+    needs: "update-tag"
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-linux-android
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup update stable
+      - name: Install cross-compilation tools
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+      - run: cargo build --release
+      - name: Upload Release
+        if: ${{ matrix.target }} == 'ubuntu-latest'
+        with:
+          run: |
+            find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+              mv "$file" "${{ matrix.target }}_$file"
+            done
+
+            find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+              gh release upload ${{ env.NIGHTLY_TAG }} "$file" --clobber
+            done

@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", default-features = false }
 tokio = { version = "*" }
+
+[lib]
+name = "cczuvonproto"
+crate-type = ["lib", "cdylib", "staticlib"]
