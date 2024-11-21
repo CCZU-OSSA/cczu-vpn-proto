@@ -4,8 +4,12 @@ use cczuni::impls::services::webvpn::WebVPNService;
 
 use crate::proxy::service;
 
+pub const VERSION: &'static str = "v1.0.0";
+
 #[no_mangle]
-pub static VERSION: &[u8] = c"v1.0.0".to_bytes_with_nul();
+pub extern "C" fn version() -> *const u8 {
+    VERSION.as_ptr()
+}
 
 /// if success, return true.
 #[no_mangle]
