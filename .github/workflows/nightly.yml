@@ -53,12 +53,11 @@ jobs:
       - run: cargo build --release
       - name: Upload Release
         if: ${{ matrix.target }} == 'ubuntu-latest'
-        with:
-          run: |
-            find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
-              mv "$file" "${{ matrix.target }}_$file"
-            done
+        run: |
+          find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+            mv "$file" "${{ matrix.target }}_$file"
+          done
 
-            find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
-              gh release upload ${{ env.NIGHTLY_TAG }} "$file" --clobber
-            done
+          find target/${{ matrix.target }}/release \( -name "*.so" \) | while read file; do
+            gh release upload ${{ env.NIGHTLY_TAG }} "$file" --clobber
+          done
