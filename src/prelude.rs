@@ -1,48 +1,46 @@
-use std::ffi::{c_char, c_int};
+use std::ffi::{c_char, c_int, c_uint, CStr};
 
 use cczuni::impls::services::webvpn::WebVPNService;
+
+use crate::proxy::service;
+
+#[no_mangle]
+pub static VERSION: &[u8] = c"v1.0.0".to_bytes_with_nul();
 
 /// if success, return true.
 #[no_mangle]
 pub extern "C" fn start_service(user: *const c_char, password: *const c_char) -> bool {
-    false
+    let user = unsafe { CStr::from_ptr(user) }
+        .to_string_lossy()
+        .to_string();
+    let password = unsafe { CStr::from_ptr(password) }
+        .to_string_lossy()
+        .to_string();
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(service::start_service(user, password))
 }
 
 /// maybe need size and packet
 #[no_mangle]
-pub extern "C" fn send_packet() {
+pub extern "C" fn send_packet(packet: *const c_uint, size: c_int) {
     todo!()
 }
 
 /// no sure should use cint/cll
 #[no_mangle]
-pub extern "C" fn receive_packet() {
+pub extern "C" fn receive_packet(size: c_int) -> *const c_uint {
     todo!()
 }
 
 #[no_mangle]
 pub extern "C" fn service_available() -> bool {
-    false
+    service::service_available()
 }
 
 #[no_mangle]
 pub extern "C" fn stop_service() -> bool {
-    false
-}
-
-#[no_mangle]
-pub extern "C" fn version_major() -> c_int {
-    1
-}
-
-#[no_mangle]
-pub extern "C" fn version_minor() -> c_int {
-    0
-}
-
-#[no_mangle]
-pub extern "C" fn version_patch() -> c_int {
-    0
+    service::stop_service()
 }
 
 #[no_mangle]

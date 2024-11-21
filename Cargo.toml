@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", default-features = false }
 tokio = { version = "*" }
+tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
+packet = { version = "*", optional = true }
 
 [lib]
 name = "cczuvpnproto"
