@@ -63,6 +63,9 @@ jobs:
       - run: cargo build --release
       - name: Upload Release
         if: ${{ matrix.target }} == 'ubuntu-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
         run: |
           cd target/${{ matrix.target }}/release
           find . -name "*.so" | while read file; do
