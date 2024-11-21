@@ -7,7 +7,7 @@ edition = "2021"
 cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", default-features = false }
 tokio = { version = "*" }
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
-packet = { version = "*", optional = true }
+byteorder = "1"
 
 [lib]
 name = "cczuvpnproto"
