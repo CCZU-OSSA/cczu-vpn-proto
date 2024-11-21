@@ -66,7 +66,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           find . -name "*.so" | while read file; do
-            mv "$f" "${f%.so}_${{ matrix.target }}.so"
+            mv -- "$file" "${file%.so}${{ matrix.target }}.so"
           done
           find . -name "*.so" | while read file; do
             gh release upload ${{ env.NIGHTLY_TAG }} "$file" --clobber
