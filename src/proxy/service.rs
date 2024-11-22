@@ -1,16 +1,20 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
-use crate::cczu::authorize;
+use crate::{cczu::authorize, ffi::ProxyServer};
 
 use super::{
-    proto::{AuthorizationPacket, Packet},
+    proto::{
+        read::comsume_authization,
+        write::{AuthorizationPacket, Packet},
+    },
     trust::NoVerification,
 };
 
 pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::new(None);
+pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
 
 /// true -> ok
 /// false -> failed
@@ -48,12 +52,34 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
         )
         .await
         .unwrap();
-        // TODO
+
         guard.replace(io);
-        return true;
+        // Release Mutex here for comsume later...
+        drop(guard);
+        if let Ok(data) = comsume_authization().await {
+            let mut guard = match PROXY_SERVER.write() {
+                Ok(inner) => inner,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.replace(data);
+            return true;
+        }
     }
 
     false
+}
+
+pub fn proxy_server() -> Option<ProxyServer> {
+    let guard = match PROXY_SERVER.read() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    if let Some(data) = guard.as_ref() {
+        return Some(data.clone());
+    }
+
+    None
 }
 
 pub fn service_available() -> bool {
@@ -75,8 +101,12 @@ pub fn stop_service() -> bool {
     if guard.is_none() {
         false
     } else {
-        let inner = guard.take().unwrap();
-        drop(inner);
+        let mut psguard = match PROXY_SERVER.write() {
+            Ok(inner) => inner,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        drop(psguard.take().unwrap());
+        drop(guard.take().unwrap());
         true
     }
 }

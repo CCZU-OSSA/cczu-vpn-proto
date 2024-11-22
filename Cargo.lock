@@ -107,6 +107,8 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "cczuni",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-rustls",
 ]

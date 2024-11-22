@@ -1,15 +1,46 @@
 use std::io::Write;
 
 use byteorder::{BigEndian, WriteBytesExt};
-
 pub trait Packet {
     fn build(&self) -> Vec<u8>;
 }
-
 pub struct AuthorizationPacket {
     token: String,
     user: String,
 }
+
+pub struct TCPPacket {
+    data: Vec<u8>,
+}
+
+impl TCPPacket {
+    fn new(data: Vec<u8>) -> TCPPacket {
+        Self { data }
+    }
+}
+
+impl Packet for TCPPacket {
+    fn build(&self) -> Vec<u8> {
+        // Custom Header
+        let mut packet = vec![1, 4];
+
+        // Length
+        packet
+            .write_u16::<BigEndian>((self.data.len() + 12) as u16)
+            .unwrap();
+        // XID
+        packet.write(&[0, 0, 0, 0]).unwrap();
+        // APP ID
+        packet.write_i32::<BigEndian>(1).unwrap();
+        // Data
+        packet.write(self.data.as_slice()).unwrap();
+
+        return packet;
+    }
+}
+
+pub static HEARTBEAT: [u8; 12] = [1, 1, 0, 12, 0, 0, 0, 0, 3, 0, 0, 0];
+
 impl AuthorizationPacket {
     pub fn new(token: String, user: String) -> Self {
         Self { token, user }

@@ -8,7 +8,8 @@ cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", d
 tokio = { version = "*" }
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
 byteorder = "1"
-
+serde = { version = "*", features = ["derive"] }
+serde_json = { version = "*" }
 [lib]
 name = "cczuvpnproto"
 crate-type = ["lib", "cdylib", "staticlib"]
