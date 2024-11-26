@@ -1,6 +1,9 @@
 use std::sync::{Arc, Mutex, RwLock};
 
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
 use crate::{cczu::authorize, ffi::ProxyServer};
@@ -8,7 +11,7 @@ use crate::{cczu::authorize, ffi::ProxyServer};
 use super::{
     proto::{
         read::comsume_authization,
-        write::{AuthorizationPacket, Packet},
+        write::{AuthorizationPacket, Packet, TCPPacket, HEARTBEAT},
     },
     trust::NoVerification,
 };
@@ -96,4 +99,65 @@ pub fn stop_service() -> bool {
         drop(guard.take().unwrap());
         true
     }
+}
+
+pub async fn receive_packet(size: u32) -> Vec<u8> {
+    let mut guard = match PROXY.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(proxy) = guard.as_mut() {
+        let mut data = vec![0u8; size as usize];
+
+        if let Ok(got) = proxy.read_exact(&mut data).await {
+            let mut real = vec![];
+            real.write_u32(got as u32).await.unwrap();
+            real.write_all(data.as_slice()).await.unwrap();
+            return real;
+        }
+    }
+
+    return vec![0, 0, 0, 0];
+}
+
+pub async fn send_packet(packet: &[u8]) -> bool {
+    let mut guard = match PROXY.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(proxy) = guard.as_mut() {
+        proxy.write(packet).await.unwrap();
+        return true;
+    }
+
+    return false;
+}
+
+pub async fn send_tcp_packet(packet: &[u8]) -> bool {
+    let mut guard = match PROXY.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(proxy) = guard.as_mut() {
+        proxy
+            .write(TCPPacket::new(packet).build().as_slice())
+            .await
+            .unwrap();
+        return true;
+    }
+
+    return false;
+}
+
+pub async fn send_heartbeat() -> bool {
+    let mut guard = match PROXY.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(proxy) = guard.as_mut() {
+        proxy.write(&HEARTBEAT).await.unwrap();
+        return true;
+    }
+
+    return false;
 }

@@ -9,17 +9,17 @@ pub struct AuthorizationPacket {
     user: String,
 }
 
-pub struct TCPPacket {
-    data: Vec<u8>,
+pub struct TCPPacket<'a> {
+    data: &'a [u8],
 }
 
-impl TCPPacket {
-    fn new(data: Vec<u8>) -> TCPPacket {
+impl<'a> TCPPacket<'a> {
+    pub fn new(data: &'a [u8]) -> TCPPacket {
         Self { data }
     }
 }
 
-impl Packet for TCPPacket {
+impl<'a> Packet for TCPPacket<'a> {
     fn build(&self) -> Vec<u8> {
         // Custom Header
         let mut packet = vec![1, 4];
@@ -33,7 +33,7 @@ impl Packet for TCPPacket {
         // APP ID
         packet.write_i32::<BigEndian>(1).unwrap();
         // Data
-        packet.write(self.data.as_slice()).unwrap();
+        packet.write(self.data).unwrap();
 
         return packet;
     }

@@ -1,4 +1,7 @@
-use std::ffi::{c_char, c_int, c_uint, CStr, CString};
+use std::{
+    ffi::{c_char, c_uchar, c_uint, CStr, CString},
+    slice,
+};
 
 use cczuni::impls::services::webvpn::WebVPNService;
 
@@ -46,14 +49,35 @@ pub extern "C" fn proxy_server() -> *mut c_char {
 
 /// After call this, remember to dealloc your data...
 #[no_mangle]
-pub extern "C" fn send_packet(packet: *const c_uint, size: c_int) {
-    todo!()
+pub extern "C" fn send_packet(packet: *const c_uchar, size: c_uint) -> bool {
+    let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(service::send_packet(bytes))
+}
+
+#[no_mangle]
+pub extern "C" fn send_tcp_packet(packet: *const c_uchar, size: c_uint) -> bool {
+    let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(service::send_tcp_packet(bytes))
+}
+
+#[no_mangle]
+pub extern "C" fn send_heartbeat() -> bool {
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(service::send_heartbeat())
 }
 
 /// When you use up the data, please dealloc this.
 #[no_mangle]
-pub extern "C" fn receive_packet(size: c_int) -> *const c_uint {
-    todo!()
+pub extern "C" fn receive_packet(size: c_uint) -> *mut c_uchar {
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(service::receive_packet(size))
+        .as_mut_ptr()
 }
 
 #[no_mangle]
