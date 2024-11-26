@@ -1292,6 +1292,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cfb5bee7a6a52939ca9224d6ac897bb669134078daa8735560897f69de4d33"
 dependencies = [
  "backtrace",
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",

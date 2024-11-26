@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", default-features = false }
-tokio = { version = "*" }
+cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0", default_features = false }
+tokio = { version = "*", features = ["io-util"] }
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
 byteorder = "1"
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
+
 [lib]
 name = "cczuvpnproto"
 crate-type = ["lib", "cdylib", "staticlib"]
