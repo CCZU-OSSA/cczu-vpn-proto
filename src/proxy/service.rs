@@ -69,19 +69,6 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
     false
 }
 
-pub fn proxy_server() -> Option<ProxyServer> {
-    let guard = match PROXY_SERVER.read() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-
-    if let Some(data) = guard.as_ref() {
-        return Some(data.clone());
-    }
-
-    None
-}
-
 pub fn service_available() -> bool {
     let guard = match PROXY.lock() {
         Ok(inner) => inner,
