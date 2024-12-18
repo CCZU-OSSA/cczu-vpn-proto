@@ -40,6 +40,14 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
                 .with_custom_certificate_verifier(Arc::new(NoVerification {}))
                 .with_no_client_auth(),
         );
+
+        let realdns: String;
+        if let Some(gateway) = data.data.gateway_list.first() {
+            realdns = gateway.dns.clone();
+        } else {
+            return false;
+        }
+
         let addr = "zmvpn.cczu.edu.cn:443";
         let connector = TlsConnector::from(config);
         let tcpstream = TcpStream::connect(addr).await.unwrap();
@@ -47,7 +55,6 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
             .connect("zmvpn.cczu.edu.cn".try_into().unwrap(), tcpstream) // TODO Check Me
             .await
             .unwrap();
-
         io.write(
             AuthorizationPacket::new(data.data.token, user.clone())
                 .build()
@@ -59,12 +66,13 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
         guard.replace(io);
         // Release Mutex here for comsume later...
         drop(guard);
-        if let Ok(data) = comsume_authization().await {
+        if let Ok(mut proxy) = comsume_authization().await {
+            proxy.dns = realdns;
             let mut guard = match PROXY_SERVER.write() {
                 Ok(inner) => inner,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            guard.replace(data);
+            guard.replace(proxy);
             return true;
         }
     }
