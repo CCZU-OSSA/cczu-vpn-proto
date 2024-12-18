@@ -31,25 +31,25 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
     if guard.is_some() {
         return false;
     }
-
-    if let Ok(data) = authorize(user, password).await {
+    let user: String = user.into();
+    let authorization = authorize(user.clone(), password).await;
+    if let Ok(data) = authorization {
         let config = Arc::new(
             ClientConfig::builder()
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(NoVerification {}))
                 .with_no_client_auth(),
         );
-        let addr = format!("{}:{}", data.data.server, data.data.admin_port); // TODO Check Me
-
+        let addr = "zmvpn.cczu.edu.cn:443";
         let connector = TlsConnector::from(config);
         let tcpstream = TcpStream::connect(addr).await.unwrap();
         let mut io = connector
-            .connect(data.data.server.try_into().unwrap(), tcpstream) // TODO Check Me
+            .connect("zmvpn.cczu.edu.cn".try_into().unwrap(), tcpstream) // TODO Check Me
             .await
             .unwrap();
 
         io.write(
-            AuthorizationPacket::new(data.data.token, "...".to_string())
+            AuthorizationPacket::new(data.data.token, user.clone())
                 .build()
                 .as_slice(),
         )
