@@ -152,9 +152,9 @@ pub async fn comsume_authization() -> Result<ProxyServer, tokio::io::Error> {
 
     // Return data here
     Ok(ProxyServer {
-        address: virtual_address,
-        mask,
-        gateway,
+        address: virtual_address.map(|e| e.to_string()).join("."),
+        mask: mask.map(|e| e.to_string()).join("."),
+        gateway: gateway.map(|e| e.to_string()).join("."),
         dns,
         wins,
     })
