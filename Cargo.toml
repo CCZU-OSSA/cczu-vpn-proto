@@ -16,3 +16,6 @@ serde_json = { version = "*" }
 [lib]
 name = "cczuvpnproto"
 crate-type = ["lib", "cdylib", "staticlib"]
+
+[profile.release]
+opt-level = "z"
