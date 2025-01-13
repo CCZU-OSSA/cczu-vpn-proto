@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", version = "0.1.0",features = ["vendored"], default-features = false }
+cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", features = [
+    "vendored",
+], default-features = false }
 tokio = { version = "*", features = ["io-util"] }
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }
 byteorder = "1"
