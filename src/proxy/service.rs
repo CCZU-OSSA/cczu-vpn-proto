@@ -1,4 +1,10 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    thread::{self, JoinHandle},
+};
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -18,6 +24,9 @@ use super::{
 
 pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::new(None);
 pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
+type _Never = ();
+pub static POLLER: Mutex<Option<JoinHandle<_Never>>> = Mutex::new(None);
+pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 /// true -> ok
 /// false -> failed
@@ -147,10 +156,9 @@ pub async fn send_tcp_packet(packet: &[u8]) -> bool {
         Err(poisoned) => poisoned.into_inner(),
     };
     if let Some(proxy) = guard.as_mut() {
-        proxy
-            .write(TCPPacket::new(packet).build().as_slice())
-            .await
-            .unwrap();
+        if let Err(err) = proxy.write(TCPPacket::new(packet).build().as_slice()).await {
+            println!("ERROR: SEND TCP PACKET - {}", err);
+        }
         return true;
     }
 
@@ -168,4 +176,37 @@ pub async fn send_heartbeat() -> bool {
     }
 
     return false;
+}
+
+pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> ()) {
+    if !POLLER_SIGNAL.load(Ordering::Relaxed) {
+        POLLER_SIGNAL.store(true, Ordering::Relaxed);
+    }
+
+    let handler: JoinHandle<_Never> = thread::spawn(move || {
+        // waiting for available
+        while POLLER_SIGNAL.load(Ordering::Relaxed) {}
+
+        loop {
+            // terminate
+            if POLLER_SIGNAL.load(Ordering::Relaxed) {
+                break;
+            }
+            // TODO READ DATA & Invoke Callback here
+            callback(1, vec![]);
+        }
+
+        // restore
+        POLLER_SIGNAL.store(false, Ordering::Relaxed);
+    });
+
+    let mut guard = match POLLER.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    guard.replace(handler);
+}
+
+pub fn stop_polling_packet() {
+    POLLER_SIGNAL.store(true, Ordering::Relaxed);
 }

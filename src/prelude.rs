@@ -1,5 +1,6 @@
 use std::{
     ffi::{c_char, c_uchar, c_uint, CStr, CString},
+    future::Future,
     slice,
 };
 
@@ -13,6 +14,11 @@ pub const VERSION: &CStr = c"v1.0.0";
 pub extern "C" fn version() -> *const c_char {
     VERSION.as_ptr()
 }
+fn sync_future<F: Future>(f: F) -> F::Output {
+    tokio::runtime::Runtime::new()
+        .expect("ERROR: Build Sync Runtime Failed")
+        .block_on(f)
+}
 
 /// if success, return true.
 #[no_mangle]
@@ -23,9 +29,7 @@ pub extern "C" fn start_service(user: *const c_char, password: *const c_char) ->
     let password = unsafe { CStr::from_ptr(password) }
         .to_string_lossy()
         .to_string();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(service::start_service(user, password))
+    sync_future(service::start_service(user, password))
 }
 
 /// Deserialize data with json, and remember to dealloc it.
@@ -51,17 +55,15 @@ pub extern "C" fn proxy_server() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn send_packet(packet: *const c_uchar, size: c_uint) -> bool {
     let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(service::send_packet(bytes))
+    sync_future(service::send_packet(bytes))
 }
 
 #[no_mangle]
 pub extern "C" fn send_tcp_packet(packet: *const c_uchar, size: c_uint) -> bool {
+    println!("EVENT: SEND TCP PACKET");
     let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(service::send_tcp_packet(bytes))
+    println!("DATA: BYTES {}", bytes.len());
+    sync_future(service::send_tcp_packet(bytes))
 }
 
 #[no_mangle]
@@ -74,10 +76,7 @@ pub extern "C" fn send_heartbeat() -> bool {
 /// When you use up the data, please dealloc this.
 #[no_mangle]
 pub extern "C" fn receive_packet(size: c_uint) -> *mut c_uchar {
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(service::receive_packet(size))
-        .as_mut_ptr()
+    sync_future(service::receive_packet(size)).as_mut_ptr()
 }
 
 #[no_mangle]
@@ -92,9 +91,7 @@ pub extern "C" fn stop_service() -> bool {
 
 #[no_mangle]
 pub extern "C" fn webvpn_available() -> bool {
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(cczuni::impls::client::DefaultClient::default().webvpn_available())
+    sync_future(cczuni::impls::client::DefaultClient::default().webvpn_available())
 }
 
 #[no_mangle]
@@ -105,4 +102,18 @@ pub extern "C" fn free_memory(pointer: *mut c_char) {
         }
         let _ = CString::from_raw(pointer);
     };
+}
+
+#[no_mangle]
+pub extern "C" fn start_polling_packet(
+    callback: extern "C" fn(size: c_uint, packet: *mut c_uchar),
+) {
+    service::start_polling_packet(move |size, mut data| {
+        callback(size, data.as_mut_ptr());
+    });
+}
+
+#[no_mangle]
+pub extern "C" fn stop_polling_packet() {
+    service::stop_polling_packet();
 }
