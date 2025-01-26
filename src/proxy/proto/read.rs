@@ -5,7 +5,7 @@ use tokio::io::AsyncReadExt;
 use crate::{ffi::ProxyServer, proxy::service::PROXY};
 
 // Read after auth
-pub async fn comsume_authization() -> Result<ProxyServer, tokio::io::Error> {
+pub async fn consume_authization() -> Result<ProxyServer, tokio::io::Error> {
     let mut guard = match PROXY.lock() {
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),

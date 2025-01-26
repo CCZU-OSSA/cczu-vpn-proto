@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 cczuni = { git = "https://github.com/CCZU-OSSA/cczuni.git", features = [
-    "vendored",
+    "rustls-tls",
 ], default-features = false }
 tokio = { version = "*", features = ["io-util"] }
 tokio-rustls = { version = "*", default-features = false, features = ["ring"] }

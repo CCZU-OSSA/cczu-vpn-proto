@@ -16,7 +16,7 @@ use crate::{cczu::authorize, ffi::ProxyServer};
 
 use super::{
     proto::{
-        read::comsume_authization,
+        read::consume_authization,
         write::{AuthorizationPacket, Packet, TCPPacket, HEARTBEAT},
     },
     trust::NoVerification,
@@ -73,9 +73,9 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
         .unwrap();
 
         guard.replace(io);
-        // Release Mutex here for comsume later...
+        // Release Mutex here for consume later...
         drop(guard);
-        if let Ok(mut proxy) = comsume_authization().await {
+        if let Ok(mut proxy) = consume_authization().await {
             proxy.dns = realdns;
             let mut guard = match PROXY_SERVER.write() {
                 Ok(inner) => inner,
