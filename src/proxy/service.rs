@@ -12,11 +12,11 @@ use tokio::{
 };
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
-use crate::{cczu::authorize, ffi::ProxyServer};
+use crate::{cczu::authorize, ffi::ProxyServer, prelude::RT};
 
 use super::{
     proto::{
-        read::consume_authization,
+        read::{consume_authization, try_read_packet_data},
         write::{AuthorizationPacket, Packet, TCPPacket, HEARTBEAT},
     },
     trust::NoVerification,
@@ -192,8 +192,13 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
             if POLLER_SIGNAL.load(Ordering::Relaxed) {
                 break;
             }
-            // TODO READ DATA & Invoke Callback here
-            callback(1, vec![]);
+            let op = RT.block_on(try_read_packet_data());
+            if let Ok(Some(data)) = op {
+                callback(data.len() as u32, data);
+            } else if let Err(err) = op {
+                // DEBUG MAY NEED BREAK?
+                println!("ERROR: {err}");
+            }
         }
 
         // restore

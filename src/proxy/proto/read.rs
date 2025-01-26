@@ -159,3 +159,38 @@ pub async fn consume_authization() -> Result<ProxyServer, tokio::io::Error> {
         wins,
     })
 }
+
+pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error> {
+    let mut guard = match PROXY.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let stream = guard.as_mut().ok_or(tokio::io::Error::new(
+        ErrorKind::NotConnected,
+        "Please connect to proxy first.",
+    ))?;
+
+    let mut header = [0u8; 8];
+
+    let got = stream.read_exact(&mut header).await?;
+    if got <= 0 {
+        return Ok(None);
+    }
+
+    if header[0] != 1 || header[1] != 2 || header[2] != 0 || header[3] != 10 {
+        let len = u16::from_le_bytes([header[3], header[2]]) - 8;
+        let mut data = vec![0u8; len.into()];
+        stream.read_exact(&mut data).await?;
+        return Ok(Some(data));
+    } else {
+        stream.read(&mut [0u8; 2048]).await?;
+    }
+    return Ok(None);
+}
+
+#[test]
+fn conv() {
+    println!("{}", u16::from_le_bytes([90u8, 200u8]));
+    println!("{}", (90u16 & 255) | (200u16 << 8));
+}
