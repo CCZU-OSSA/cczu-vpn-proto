@@ -9,7 +9,7 @@ use cczuni::impls::services::webvpn::WebVPNService;
 
 use crate::proxy::service;
 
-pub const VERSION: &CStr = c"v1.0.0";
+pub const VERSION: &CStr = c"v1.0.0+1";
 
 #[no_mangle]
 pub extern "C" fn version() -> *const c_char {
