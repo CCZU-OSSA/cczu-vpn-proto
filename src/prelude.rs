@@ -2,6 +2,7 @@ use std::{
     ffi::{c_char, c_uchar, c_uint, CStr, CString},
     future::Future,
     slice,
+    sync::LazyLock,
 };
 
 use cczuni::impls::services::webvpn::WebVPNService;
@@ -14,10 +15,12 @@ pub const VERSION: &CStr = c"v1.0.0";
 pub extern "C" fn version() -> *const c_char {
     VERSION.as_ptr()
 }
+
+pub static RT: LazyLock<tokio::runtime::Runtime> =
+    LazyLock::new(|| tokio::runtime::Runtime::new().expect("Create Tokio Runtime failed!"));
+
 fn sync_future<F: Future>(f: F) -> F::Output {
-    tokio::runtime::Runtime::new()
-        .expect("ERROR: Build Sync Runtime Failed")
-        .block_on(f)
+    RT.block_on(f)
 }
 
 /// if success, return true.
@@ -60,9 +63,7 @@ pub extern "C" fn send_packet(packet: *const c_uchar, size: c_uint) -> bool {
 
 #[no_mangle]
 pub extern "C" fn send_tcp_packet(packet: *const c_uchar, size: c_uint) -> bool {
-    println!("EVENT: SEND TCP PACKET");
     let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
-    println!("DATA: BYTES {}", bytes.len());
     sync_future(service::send_tcp_packet(bytes))
 }
 
