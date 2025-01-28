@@ -1,3 +1,4 @@
+// !DONT CALL THEM IN A TOKIO ASYNC CONTEXT!
 use std::{
     ffi::{c_char, c_uchar, c_uint, CStr, CString},
     future::Future,
@@ -6,6 +7,7 @@ use std::{
 };
 
 use cczuni::impls::services::webvpn::WebVPNService;
+use tokio::runtime::Runtime;
 
 use crate::proxy::service;
 
@@ -16,10 +18,10 @@ pub extern "C" fn version() -> *const c_char {
     VERSION.as_ptr()
 }
 
-pub static RT: LazyLock<tokio::runtime::Runtime> =
-    LazyLock::new(|| tokio::runtime::Runtime::new().expect("Create Tokio Runtime failed!"));
+pub static RT: LazyLock<Runtime> =
+    LazyLock::new(|| Runtime::new().expect("Create Tokio Runtime failed!"));
 
-fn sync_future<F: Future>(f: F) -> F::Output {
+fn run_sync_in_rt<F: Future>(f: F) -> F::Output {
     RT.block_on(f)
 }
 
@@ -32,7 +34,7 @@ pub extern "C" fn start_service(user: *const c_char, password: *const c_char) ->
     let password = unsafe { CStr::from_ptr(password) }
         .to_string_lossy()
         .to_string();
-    sync_future(service::start_service(user, password))
+    run_sync_in_rt(service::start_service(user, password))
 }
 
 /// Deserialize data with json, and remember to dealloc it.
@@ -58,31 +60,29 @@ pub extern "C" fn proxy_server() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn send_packet(packet: *const c_uchar, size: c_uint) -> bool {
     let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
-    sync_future(service::send_packet(bytes))
+    run_sync_in_rt(service::send_packet(bytes))
 }
 
 #[no_mangle]
 pub extern "C" fn send_tcp_packet(packet: *const c_uchar, size: c_uint) -> bool {
     let bytes = unsafe { slice::from_raw_parts(packet, size as usize) };
-    sync_future(service::send_tcp_packet(bytes))
+    run_sync_in_rt(service::send_tcp_packet(bytes))
 }
 
 #[no_mangle]
 pub extern "C" fn send_heartbeat() -> bool {
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(service::send_heartbeat())
+    run_sync_in_rt(service::send_heartbeat())
 }
 
 /// When you use up the data, please dealloc this.
 #[no_mangle]
 pub extern "C" fn receive_packet(size: c_uint) -> *mut c_uchar {
-    sync_future(service::receive_packet(size)).as_mut_ptr()
+    run_sync_in_rt(service::receive_packet(size)).as_mut_ptr()
 }
 
 #[no_mangle]
 pub extern "C" fn service_available() -> bool {
-    service::service_available()
+    run_sync_in_rt(service::service_available())
 }
 
 #[no_mangle]
@@ -92,7 +92,7 @@ pub extern "C" fn stop_service() -> bool {
 
 #[no_mangle]
 pub extern "C" fn webvpn_available() -> bool {
-    sync_future(cczuni::impls::client::DefaultClient::default().webvpn_available())
+    run_sync_in_rt(cczuni::impls::client::DefaultClient::default().webvpn_available())
 }
 
 #[no_mangle]

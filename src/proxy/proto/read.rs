@@ -2,14 +2,11 @@ use std::io::ErrorKind;
 
 use tokio::io::AsyncReadExt;
 
-use crate::{ffi::ProxyServer, proxy::service::PROXY};
+use crate::{model::ProxyServer, proxy::service::PROXY};
 
 // Read after auth
 pub async fn consume_authization() -> Result<ProxyServer, tokio::io::Error> {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
 
     let stream = guard.as_mut().ok_or(tokio::io::Error::new(
         ErrorKind::NotConnected,
@@ -161,10 +158,7 @@ pub async fn consume_authization() -> Result<ProxyServer, tokio::io::Error> {
 }
 
 pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error> {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
 
     let stream = guard.as_mut().ok_or(tokio::io::Error::new(
         ErrorKind::NotConnected,

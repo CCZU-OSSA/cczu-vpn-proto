@@ -1,18 +1,17 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, RwLock,
-    },
-    thread::{self, JoinHandle},
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, RwLock,
 };
 
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::Mutex,
+    task::JoinHandle,
 };
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
-use crate::{cczu::authorize, ffi::ProxyServer, prelude::RT};
+use crate::{cczu::authorize, model::ProxyServer, syncffi::RT};
 
 use super::{
     proto::{
@@ -22,19 +21,15 @@ use super::{
     trust::NoVerification,
 };
 
-pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::new(None);
+pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::const_new(None);
 pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
-type _Never = ();
-pub static POLLER: Mutex<Option<JoinHandle<_Never>>> = Mutex::new(None);
+pub static POLLER: std::sync::Mutex<Option<JoinHandle<()>>> = std::sync::Mutex::new(None);
 pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 /// true -> ok
 /// false -> failed
 pub async fn start_service(user: impl Into<String>, password: impl Into<String>) -> bool {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
 
     // Service is Running...
     if guard.is_some() {
@@ -89,21 +84,13 @@ pub async fn start_service(user: impl Into<String>, password: impl Into<String>)
     false
 }
 
-pub fn service_available() -> bool {
-    let guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-
-    return guard.is_some();
+pub async fn service_available() -> bool {
+    return PROXY.lock().await.is_some();
 }
 
 /// false -> guard is none
 pub fn stop_service() -> bool {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.blocking_lock();
 
     if guard.is_none() {
         false
@@ -119,10 +106,8 @@ pub fn stop_service() -> bool {
 }
 
 pub async fn receive_packet(size: u32) -> Vec<u8> {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
+
     if let Some(proxy) = guard.as_mut() {
         let mut data = vec![0u8; size as usize];
 
@@ -138,10 +123,8 @@ pub async fn receive_packet(size: u32) -> Vec<u8> {
 }
 
 pub async fn send_packet(packet: &[u8]) -> bool {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
+
     if let Some(proxy) = guard.as_mut() {
         proxy.write(packet).await.unwrap();
         return true;
@@ -151,10 +134,8 @@ pub async fn send_packet(packet: &[u8]) -> bool {
 }
 
 pub async fn send_tcp_packet(packet: &[u8]) -> bool {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
+
     if let Some(proxy) = guard.as_mut() {
         if let Err(err) = proxy.write(TCPPacket::new(packet).build().as_slice()).await {
             println!("ERROR: SEND TCP PACKET - {}", err);
@@ -166,10 +147,7 @@ pub async fn send_tcp_packet(packet: &[u8]) -> bool {
 }
 
 pub async fn send_heartbeat() -> bool {
-    let mut guard = match PROXY.lock() {
-        Ok(inner) => inner,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let mut guard = PROXY.lock().await;
     if let Some(proxy) = guard.as_mut() {
         proxy.write(&HEARTBEAT).await.unwrap();
         return true;
@@ -179,39 +157,50 @@ pub async fn send_heartbeat() -> bool {
 }
 
 pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> ()) {
-    if !POLLER_SIGNAL.load(Ordering::Relaxed) {
-        POLLER_SIGNAL.store(true, Ordering::Relaxed);
-    }
-
-    let handler: JoinHandle<_Never> = thread::spawn(move || {
-        // waiting for available
-        while POLLER_SIGNAL.load(Ordering::Relaxed) {}
-
-        loop {
-            // terminate
-            if POLLER_SIGNAL.load(Ordering::Relaxed) {
-                break;
-            }
-            let op = RT.block_on(try_read_packet_data());
-            if let Ok(Some(data)) = op {
-                callback(data.len() as u32, data);
-            } else if let Err(err) = op {
-                // DEBUG MAY NEED BREAK?
-                println!("ERROR: {err}");
-            }
-        }
-
-        // restore
-        POLLER_SIGNAL.store(false, Ordering::Relaxed);
-    });
-
     let mut guard = match POLLER.lock() {
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),
     };
+    if let Some(_) = guard.as_mut() {
+        if !POLLER_SIGNAL.load(Ordering::Relaxed) {
+            stop_service();
+        }
+    }
+
+    let handler: JoinHandle<()> = tokio::runtime::Handle::try_current()
+        .unwrap_or(RT.handle().clone())
+        .spawn(async move {
+            // waiting for available
+            while POLLER_SIGNAL.load(Ordering::Relaxed) {}
+            loop {
+                // terminate
+                if POLLER_SIGNAL.load(Ordering::Relaxed) {
+                    break;
+                }
+                let op = try_read_packet_data().await;
+                if let Ok(Some(data)) = op {
+                    callback(data.len() as u32, data);
+                } else if let Err(err) = op {
+                    // DEBUG MAY NEED BREAK?
+                    println!("ERROR: {err}");
+                }
+            }
+
+            // restore
+            POLLER_SIGNAL.store(false, Ordering::Relaxed);
+        });
+
     guard.replace(handler);
 }
 
 pub fn stop_polling_packet() {
     POLLER_SIGNAL.store(true, Ordering::Relaxed);
+}
+
+pub async fn waiting_polling_packet_stop() -> Result<(), tokio::task::JoinError> {
+    let mut guard = POLLER.lock().unwrap();
+    if let Some(handler) = guard.as_mut() {
+        return handler.await;
+    }
+    return Ok(());
 }
