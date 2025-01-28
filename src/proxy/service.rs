@@ -184,12 +184,12 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
                 let op = try_read_packet_data().await;
                 if let Ok(Some(data)) = op {
                     let len = data.len();
+
+                    // is the packet is heartbeat
                     if len != 4 && data[0] != 3 {
                         callback(len as u32, data);
-                    }
-                    if len < 8 {
+                    } else {
                         send_heartbeat().await;
-                        time::sleep(Duration::from_millis(200)).await;
                     }
                 } else if let Ok(None) = op {
                     send_heartbeat().await;
