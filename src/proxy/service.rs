@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, RwLock,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex as StandardMutex, RwLock,
+    },
+    time::Duration,
 };
 
 use tokio::{
@@ -8,6 +11,7 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
     task::JoinHandle,
+    time,
 };
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
@@ -23,7 +27,8 @@ use super::{
 
 pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::const_new(None);
 pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
-pub static POLLER: std::sync::Mutex<Option<JoinHandle<()>>> = std::sync::Mutex::new(None);
+pub static POLLER: StandardMutex<Option<JoinHandle<()>>> = StandardMutex::new(None);
+pub static MESSAGE_COUNT: RwLock<usize> = RwLock::new(0);
 pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
 
 /// true -> ok
@@ -161,10 +166,9 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(_) = guard.as_mut() {
-        if !POLLER_SIGNAL.load(Ordering::Relaxed) {
-            stop_service();
-        }
+
+    if guard.as_ref().is_some() && !POLLER_SIGNAL.load(Ordering::Relaxed) {
+        stop_service();
     }
 
     let handler: JoinHandle<()> = tokio::runtime::Handle::try_current()
@@ -179,10 +183,18 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
                 }
                 let op = try_read_packet_data().await;
                 if let Ok(Some(data)) = op {
-                    callback(data.len() as u32, data);
+                    let len = data.len();
+                    callback(len as u32, data);
+                    if len < 8 {
+                        send_heartbeat().await;
+                        time::sleep(Duration::from_millis(200)).await;
+                    }
+                } else if let Ok(None) = op {
+                    send_heartbeat().await;
+                    time::sleep(Duration::from_millis(200)).await;
                 } else if let Err(err) = op {
-                    // DEBUG MAY NEED BREAK?
                     println!("ERROR: {err}");
+                    break;
                 }
             }
 
