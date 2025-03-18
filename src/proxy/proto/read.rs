@@ -1,6 +1,7 @@
 use std::io::ErrorKind;
 
 use tokio::io::AsyncReadExt;
+use tokio::time::{timeout, Duration};
 
 use crate::{model::ProxyServer, proxy::service::PROXY};
 
@@ -166,20 +167,32 @@ pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error>
     ))?;
 
     let mut header = [0u8; 8];
-    let got = stream.read(&mut header).await?;
-    if got < 8 {
-        return Ok(None);
-    }
-    if header[0] != 1 || header[1] != 2 || header[2] != 0 || header[3] != 10 {
-        let len = u16::from_le_bytes([header[3], header[2]]) - 8;
-        let mut data = vec![0u8; len.into()];
-        stream.read_exact(&mut data).await?;
-        return Ok(Some(data));
-    } else {
-        stream.read(&mut [0u8; 2048]).await?;
+    match timeout(Duration::from_millis(500), stream.read(&mut header)).await {
+        Ok(Ok(got)) => {
+            if got < 8 {
+                return Ok(None);
+            }
+            if header[0] != 1 || header[1] != 2 || header[2] != 0 || header[3] != 10 {
+                let len = u16::from_le_bytes([header[3], header[2]]) - 8;
+                let mut data = vec![0u8; len.into()];
+                match timeout(Duration::from_secs(5), stream.read_exact(&mut data)).await {
+                    Ok(Ok(_)) => return Ok(None),
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(None),
+                }
+            } else {
+                match timeout(Duration::from_secs(5), stream.read(&mut [0u8; 2048])).await {
+                    Ok(Ok(_)) => (),
+                    Ok(Err(e)) => return Err(e),
+                    Err(_) => return Ok(None),
+                }
+            }
+        }
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Ok(None),
     }
 
-    return Ok(None);
+    Ok(None)
 }
 
 #[test]
