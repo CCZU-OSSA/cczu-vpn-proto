@@ -176,7 +176,7 @@ pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error>
                 let len = u16::from_le_bytes([header[3], header[2]]) - 8;
                 let mut data = vec![0u8; len.into()];
                 match timeout(Duration::from_secs(5), stream.read_exact(&mut data)).await {
-                    Ok(Ok(_)) => return Ok(None),
+                    Ok(Ok(_)) => return Ok(Some(data)),
                     Ok(Err(e)) => return Err(e),
                     Err(_) => return Ok(None),
                 }
