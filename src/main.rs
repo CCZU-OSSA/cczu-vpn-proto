@@ -8,7 +8,7 @@ use cczuvpnproto::proxy::service::{self, send_tcp_packet};
 
 #[cfg(target_os = "windows")]
 async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    use std::sync::Arc;
+    use std::{net::IpAddr, str::FromStr, sync::Arc};
 
     let guard = match service::PROXY_SERVER.read() {
         Ok(inner) => inner,
@@ -19,15 +19,16 @@ async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + S
         panic!("No server to create TUN Device");
     }
     let server = info.unwrap().clone();
-
+    println!("server {}", serde_json::to_string(&server).unwrap());
     let mut config = tun::Configuration::default();
     config
         .address(server.address)
         .netmask(server.mask)
-        .destination(server.dns)
         .tun_name("CCZU-VPN-PROTO")
         .up();
-
+    config.platform_config(|config| {
+        config.dns_servers(&[IpAddr::from_str(&server.dns).unwrap()]);
+    });
     let device = Arc::new(tun::create(&config)?);
     let device_output = device.clone();
 
@@ -62,7 +63,7 @@ async fn main() {
     println!("密码: ");
     let mut password = String::new();
     stdin().lock().read_line(&mut password).unwrap();
-    let status = service::start_service(user, password).await;
+    let status = service::start_service(user.trim(), password.trim()).await;
     if !status {
         panic!("Failed to login");
     }
