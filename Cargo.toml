@@ -13,6 +13,9 @@ byteorder = "1"
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 
+# executable
+tun = { version = "0.7" }
+
 [lib]
 name = "cczuvpnproto"
 crate-type = ["lib", "cdylib", "staticlib"]

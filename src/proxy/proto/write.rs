@@ -14,7 +14,7 @@ pub struct TCPPacket<'a> {
 }
 
 impl<'a> TCPPacket<'a> {
-    pub fn new(data: &'a [u8]) -> TCPPacket {
+    pub fn new(data: &'a [u8]) -> TCPPacket<'a> {
         Self { data }
     }
 }

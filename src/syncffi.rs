@@ -74,10 +74,10 @@ pub extern "C" fn send_heartbeat() -> bool {
     run_sync_in_rt(service::send_heartbeat())
 }
 
-/// When you use up the data, please dealloc this.
 #[no_mangle]
-pub extern "C" fn receive_packet(size: c_uint) -> *mut c_uchar {
-    run_sync_in_rt(service::receive_packet(size)).as_mut_ptr()
+pub extern "C" fn receive_packet(size: c_uint) -> *const c_uchar {
+    let data = run_sync_in_rt(service::receive_packet(size));
+    data.as_ptr()
 }
 
 #[no_mangle]

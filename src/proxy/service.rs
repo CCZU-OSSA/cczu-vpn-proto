@@ -30,6 +30,7 @@ pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
 pub static POLLER: StandardMutex<Option<JoinHandle<()>>> = StandardMutex::new(None);
 pub static MESSAGE_COUNT: RwLock<usize> = RwLock::new(0);
 pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
+pub static PACKET_NUM: Mutex<usize> = Mutex::const_new(0);
 
 /// true -> ok
 /// false -> failed
