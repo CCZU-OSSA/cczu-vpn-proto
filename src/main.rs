@@ -63,7 +63,13 @@ async fn main() {
         .webvpn_available()
         .await
     {
-        panic!("webvpn not available");
+        let mut choice = String::new();
+        println!("webvpn may not be available, are you sure to connect? (Y/n)");
+        stdin().lock().read_line(&mut choice).unwrap();
+
+        if choice.trim().to_lowercase() == "n" {
+            return;
+        }
     }
 
     println!("用户: ");
