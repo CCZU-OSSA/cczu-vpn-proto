@@ -4,12 +4,18 @@ use std::{
 };
 
 use cczuni::impls::services::webvpn::WebVPNService;
-use cczuvpnproto::proxy::service::{self, send_tcp_packet};
+use cczuvpnproto::proxy::service;
 
 #[cfg(target_os = "windows")]
 async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    use std::{fs::File, io::Write};
     use std::{net::IpAddr, str::FromStr, sync::Arc};
-
+    let dll = include_bytes!("../wintun.dll");
+    if !exists("wintun.dll").unwrap_or(false) {
+        println!("Create wintun.dll...");
+        let mut out = File::create("wintun.dll").unwrap();
+        out.write(dll).unwrap();
+    }
     let guard = match service::PROXY_SERVER.read() {
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),
@@ -40,10 +46,13 @@ async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + S
     let mut buf = [0; 65535];
     loop {
         let len = device.recv(&mut buf).unwrap();
-        //println!("                 send buf {:?}", &buf[..len]);
         println!("send datasize {len}");
-        if !send_tcp_packet(&mut buf[..len]).await {
+        if !service::send_tcp_packet(&mut buf[..len]).await {
             println!("packet send failed");
+        }
+
+        if !service::POLLER_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
         }
     }
 }
@@ -64,21 +73,13 @@ async fn main() {
     let mut password = String::new();
     stdin().lock().read_line(&mut password).unwrap();
     let status = service::start_service(user.trim(), password.trim()).await;
+
     if !status {
         panic!("Failed to login");
     }
 
-    if cfg!(target_os = "windows") {
-        use std::{fs::File, io::Write};
-        let dll = include_bytes!("../wintun.dll");
-        if !exists("wintun.dll").unwrap_or(false) {
-            println!("Create wintun.dll...");
-            let mut out = File::create("wintun.dll").unwrap();
-            out.write(dll).unwrap();
-        }
-
+    #[cfg(target_os = "windows")]
+    {
         windows_implements().await.unwrap();
-    } else {
-        panic!("This platform is not implemented yet...")
     }
 }

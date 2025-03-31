@@ -28,9 +28,7 @@ use super::{
 pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::const_new(None);
 pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
 pub static POLLER: StandardMutex<Option<JoinHandle<()>>> = StandardMutex::new(None);
-pub static MESSAGE_COUNT: RwLock<usize> = RwLock::new(0);
 pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
-pub static PACKET_NUM: Mutex<usize> = Mutex::const_new(0);
 
 /// true -> ok
 /// false -> failed
@@ -172,6 +170,20 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
         stop_service();
     }
 
+    static HEARTBEAT_THROTTLER: AtomicBool = AtomicBool::new(false);
+    let heartbeat = || async move {
+        if !HEARTBEAT_THROTTLER.load(Ordering::Relaxed) {
+            tokio::runtime::Handle::try_current()
+                .unwrap_or(RT.handle().clone())
+                .spawn(async move {
+                    HEARTBEAT_THROTTLER.store(true, Ordering::Relaxed);
+                    time::sleep(Duration::from_secs(5)).await;
+                    send_heartbeat().await;
+                    HEARTBEAT_THROTTLER.store(false, Ordering::Relaxed);
+                });
+        }
+    };
+
     let handler: JoinHandle<()> = tokio::runtime::Handle::try_current()
         .unwrap_or(RT.handle().clone())
         .spawn(async move {
@@ -190,11 +202,10 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
                     if len != 4 && data[0] != 3 {
                         callback(len as u32, data);
                     } else {
-                        send_heartbeat().await;
+                        heartbeat().await;
                     }
                 } else if let Ok(None) = op {
-                    send_heartbeat().await;
-                    time::sleep(Duration::from_millis(200)).await;
+                    heartbeat().await;
                 } else if let Err(err) = op {
                     callback(0, Vec::from(err.to_string()));
                     println!("ERROR: {err}");
