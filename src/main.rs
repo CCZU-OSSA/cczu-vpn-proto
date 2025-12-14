@@ -1,20 +1,22 @@
 use std::{
-    fs::exists,
     io::{stdin, BufRead},
+    sync::Arc,
 };
 
 use cczuni::impls::services::webvpn::WebVPNService;
 use cczuvpnproto::proxy::service;
 
-#[cfg(target_os = "windows")]
-async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    use std::{fs::File, io::Write};
-    use std::{net::IpAddr, str::FromStr, sync::Arc};
-    let dll = include_bytes!("../wintun.dll");
-    if !exists("wintun.dll").unwrap_or(false) {
-        println!("Create wintun.dll...");
-        let mut out = File::create("wintun.dll").unwrap();
-        out.write(dll).unwrap();
+async fn create_device() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::{fs::File, io::Write};
+        use std::{net::IpAddr, str::FromStr, sync::Arc};
+        let dll = include_bytes!("../wintun.dll");
+        if !exists("wintun.dll").unwrap_or(false) {
+            println!("Create wintun.dll...");
+            let mut out = File::create("wintun.dll").unwrap();
+            out.write(dll).unwrap();
+        }
     }
     let guard = match service::PROXY_SERVER.read() {
         Ok(inner) => inner,
@@ -33,7 +35,14 @@ async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + S
         .tun_name("CCZU-VPN-PROTO")
         .up();
     config.platform_config(|config| {
-        config.dns_servers(&[IpAddr::from_str(&server.dns).unwrap()]);
+        #[cfg(target_os = "windows")]
+        {
+            config.dns_servers(&[IpAddr::from_str(&server.dns).unwrap()]);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            config.ensure_root_privileges(true);
+        }
     });
     let device = Arc::new(tun::create(&config)?);
     let device_output = device.clone();
@@ -51,7 +60,7 @@ async fn windows_implements() -> Result<(), Box<dyn std::error::Error + Send + S
             println!("packet send failed");
         }
 
-        if !service::POLLER_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) {
+        if service::POLLER_SIGNAL.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(());
         }
     }
@@ -83,9 +92,5 @@ async fn main() {
     if !status {
         panic!("Failed to login");
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        windows_implements().await.unwrap();
-    }
+    create_device().await.unwrap();
 }

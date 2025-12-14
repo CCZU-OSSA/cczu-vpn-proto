@@ -172,7 +172,7 @@ pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error>
             if got < 8 {
                 return Ok(None);
             }
-            if header[0] != 1 || header[1] != 2 || header[2] != 0 || header[3] != 10 {
+            if header[0] != 1 || header[1] != 2 || header[2] != 0 || (header[3] != 10 && header[3] != 12) {
                 let len = u16::from_le_bytes([header[3], header[2]]) - 8;
                 let mut data = vec![0u8; len.into()];
                 match timeout(Duration::from_secs(5), stream.read_exact(&mut data)).await {
@@ -191,7 +191,6 @@ pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error>
         Ok(Err(e)) => return Err(e),
         Err(_) => return Ok(None),
     }
-
     Ok(None)
 }
 
