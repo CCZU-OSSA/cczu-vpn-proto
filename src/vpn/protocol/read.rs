@@ -1,205 +1,143 @@
-use std::io::ErrorKind;
-
+use anyhow::{bail, ensure, Context, Result};
 use tokio::io::AsyncReadExt;
-use tokio::time::{timeout, Duration};
 
-use crate::{types::ProxyServer, vpn::service::PROXY};
+use crate::types::ProxyServer;
 
-// Read after auth
-pub async fn consume_authization() -> Result<ProxyServer, tokio::io::Error> {
-    let mut guard = PROXY.lock().await;
+use super::stream::ProxyStream;
 
-    let stream = guard.as_mut().ok_or(tokio::io::Error::new(
-        ErrorKind::NotConnected,
-        "Please connect to proxy first.",
-    ))?;
-    // 1. Auth Status
-    // Skip 10
-    stream.read_exact(&mut [0u8; 10]).await?;
+pub async fn consume_authization(stream: &mut ProxyStream) -> Result<ProxyServer> {
+    stream
+        .read_exact(&mut [0u8; 10])
+        .await
+        .context("failed to read authorization prefix")?;
 
     let mut auth_status = vec![0, 0];
-    stream.read_exact(&mut auth_status).await?;
-    if !(auth_status[0] == 0 && auth_status[1] == 0) {
-        return Err(tokio::io::Error::new(ErrorKind::Other, "Authorize Failed."));
-    }
+    stream
+        .read_exact(&mut auth_status)
+        .await
+        .context("failed to read authorization status")?;
+    ensure!(
+        auth_status == [0, 0],
+        "authorization failed with status: {:?}",
+        auth_status
+    );
 
-    // 2. virtual_address
     let mut status = [0u8; 3];
-    stream.read_exact(&mut status).await?;
+    stream
+        .read_exact(&mut status)
+        .await
+        .context("failed to read virtual address tag")?;
+    ensure!(
+        status == [11, 0, 4],
+        "invalid virtual address tag: {:?}",
+        status
+    );
 
-    let virtual_address: [u8; 4];
-    if status[0] == 11 && status[1] == 0 && status[2] == 4 {
-        virtual_address = [
-            stream.read_u8().await? & 255,
-            stream.read_u8().await? & 255,
-            stream.read_u8().await? & 255,
-            stream.read_u8().await? & 255,
-        ];
-    } else {
-        return Err(tokio::io::Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid Data Header `{:?}`", status),
-        ));
-    }
+    let virtual_address = [
+        stream
+            .read_u8()
+            .await
+            .context("failed to read address octet 0")?,
+        stream
+            .read_u8()
+            .await
+            .context("failed to read address octet 1")?,
+        stream
+            .read_u8()
+            .await
+            .context("failed to read address octet 2")?,
+        stream
+            .read_u8()
+            .await
+            .context("failed to read address octet 3")?,
+    ];
 
-    // 3. virtual_mask
-    let mut raw_mask = 0;
-    let mut status = [0u8; 3];
-    stream.read_exact(&mut status).await?;
-    if status[0] == 12 && status[1] == 0 && status[2] == 4 {
-        let mut a = 0;
-        let mut b = 0;
-        let mut data = vec![0u8; 4];
-        stream.read_exact(&mut data).await?;
-        data.iter().for_each(|val| {
-            let val = val & 255;
-            let binary = format!("{val:b}");
-            while let Some(pos) = binary
-                .chars()
-                .enumerate()
-                .position(|(pos, char)| pos >= b && char == '1')
-            {
-                a = pos + 1;
-                b += 1;
-            }
+    stream
+        .read_exact(&mut status)
+        .await
+        .context("failed to read mask tag")?;
+    ensure!(
+        status == [12, 0, 4],
+        "invalid virtual mask tag: {:?}",
+        status
+    );
 
-            raw_mask += b;
-        });
-    } else {
-        return Err(tokio::io::Error::new(
-            ErrorKind::InvalidData,
-            format!("Invalid Data Header `{:?}`", status),
-        ));
-    }
+    let mut mask = [0u8; 4];
+    stream
+        .read_exact(&mut mask)
+        .await
+        .context("failed to read virtual mask")?;
 
-    let mut vec_mask = vec![true; raw_mask];
-    vec_mask.append(&mut vec![false; 32 - raw_mask]);
-    let chucks_mask: Vec<u8> = vec_mask
-        .chunks(8)
-        .map(|chuck| {
-            u8::from_str_radix(
-                &chuck.iter().fold(String::new(), |val, e| {
-                    if *e {
-                        format!("{val}1")
-                    } else {
-                        format!("{val}0")
-                    }
-                }),
-                2,
-            )
-            .unwrap()
-        })
-        .collect();
-
-    let mask: [u8; 4] = chucks_mask[0..4].try_into().unwrap();
-
-    // 4. gateway/dns/wins
     let mut gateway = [0u8; 4];
     let mut dns = String::default();
     let mut wins = String::default();
 
     loop {
-        let mut status = [0u8; 2];
-        stream.read_exact(&mut status).await?;
-        if status[0] != 43 {
-            match status {
-                [35, 0] => {
-                    let length = stream.read_u8().await?;
-                    let mut data = vec![0u8; length as usize];
-                    stream.read_exact(&mut data).await?;
-
-                    gateway = [data[0] & 255, data[1] & 255, data[2] & 255, data[3] & 255];
-                }
-                [36, 0] => {
-                    let length = stream.read_u8().await?;
-                    let mut data = vec![0u8; length as usize];
-                    stream.read_exact(&mut data).await?;
-
-                    dns = String::from_utf8(data).map_err(|e| {
-                        tokio::io::Error::new(ErrorKind::InvalidData, e.to_string())
-                    })?;
-                }
-                [37, 0] => {
-                    let length = stream.read_u8().await?;
-                    let mut data = vec![0u8; length as usize];
-                    stream.read_exact(&mut data).await?;
-
-                    wins = String::from_utf8(data).map_err(|e| {
-                        tokio::io::Error::new(ErrorKind::InvalidData, e.to_string())
-                    })?;
-                }
-                _ => {
-                    return Err(tokio::io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Invalid Status {:?}", status),
-                    ))
-                }
-            };
-        } else {
+        let mut field_tag = [0u8; 2];
+        stream
+            .read_exact(&mut field_tag)
+            .await
+            .context("failed to read auth response field tag")?;
+        if field_tag[0] == 43 {
             break;
+        }
+
+        match field_tag {
+            [35, 0] => {
+                let length = stream
+                    .read_u8()
+                    .await
+                    .context("failed to read gateway length")?;
+                ensure!(length == 4, "invalid gateway length: {length}");
+                stream
+                    .read_exact(&mut gateway)
+                    .await
+                    .context("failed to read gateway bytes")?;
+            }
+            [36, 0] => {
+                let length = stream
+                    .read_u8()
+                    .await
+                    .context("failed to read DNS length")?;
+                let mut data = vec![0u8; length as usize];
+                stream
+                    .read_exact(&mut data)
+                    .await
+                    .context("failed to read DNS bytes")?;
+                dns = String::from_utf8(data).context("invalid DNS utf-8")?;
+            }
+            [37, 0] => {
+                let length = stream
+                    .read_u8()
+                    .await
+                    .context("failed to read WINS length")?;
+                let mut data = vec![0u8; length as usize];
+                stream
+                    .read_exact(&mut data)
+                    .await
+                    .context("failed to read WINS bytes")?;
+                wins = String::from_utf8(data).context("invalid WINS utf-8")?;
+            }
+            _ => bail!("invalid auth response field tag: {:?}", field_tag),
         }
     }
 
-    // 5. empty_data
     loop {
-        let bin = stream.read_u8().await?;
+        let bin = stream
+            .read_u8()
+            .await
+            .context("failed to read auth response trailer")?;
         if bin == 255 {
             break;
         }
     }
 
-    // Return data here
     Ok(ProxyServer {
         address: virtual_address.map(|e| e.to_string()).join("."),
         mask: mask.map(|e| e.to_string()).join("."),
         gateway: gateway.map(|e| e.to_string()).join("."),
         dns,
         wins,
+        split_tunnel_routes: Vec::new(),
     })
-}
-
-pub async fn try_read_packet_data() -> Result<Option<Vec<u8>>, tokio::io::Error> {
-    let mut guard = PROXY.lock().await;
-
-    let stream = guard.as_mut().ok_or(tokio::io::Error::new(
-        ErrorKind::NotConnected,
-        "Please connect to proxy first.",
-    ))?;
-
-    let mut header = [0u8; 8];
-    match timeout(Duration::from_millis(500), stream.read(&mut header)).await {
-        Ok(Ok(got)) => {
-            if got < 8 {
-                return Ok(None);
-            }
-            if header[0] != 1
-                || header[1] != 2
-                || header[2] != 0
-                || (header[3] != 10 && header[3] != 12)
-            {
-                let len = u16::from_le_bytes([header[3], header[2]]) - 8;
-                let mut data = vec![0u8; len.into()];
-                match timeout(Duration::from_secs(5), stream.read_exact(&mut data)).await {
-                    Ok(Ok(_)) => return Ok(Some(data)),
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Ok(None),
-                }
-            } else {
-                match timeout(Duration::from_secs(5), stream.read(&mut [0u8; 2048])).await {
-                    Ok(Ok(_)) => (),
-                    Ok(Err(e)) => return Err(e),
-                    Err(_) => return Ok(None),
-                }
-            }
-        }
-        Ok(Err(e)) => return Err(e),
-        Err(_) => return Ok(None),
-    }
-    Ok(None)
-}
-
-#[test]
-fn conv() {
-    println!("{}", u16::from_le_bytes([90u8, 200u8]));
-    println!("{}", (90u16 & 255) | (200u16 << 8));
 }

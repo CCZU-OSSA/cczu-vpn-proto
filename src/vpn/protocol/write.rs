@@ -1,9 +1,12 @@
 use std::io::Write;
 
+use anyhow::{Context, Result};
 use byteorder::{BigEndian, WriteBytesExt};
+
 pub trait Packet {
-    fn build(&self) -> Vec<u8>;
+    fn build(&self) -> Result<Vec<u8>>;
 }
+
 pub struct AuthorizationPacket {
     token: String,
     user: String,
@@ -20,22 +23,35 @@ impl<'a> TCPPacket<'a> {
 }
 
 impl<'a> Packet for TCPPacket<'a> {
-    fn build(&self) -> Vec<u8> {
+    fn build(&self) -> Result<Vec<u8>> {
         // Custom Header
         let mut packet = vec![1, 4];
+        let total_len = self
+            .data
+            .len()
+            .checked_add(12)
+            .context("TCP packet length overflow")?;
+        let total_len = u16::try_from(total_len)
+            .with_context(|| format!("TCP packet too large: {} bytes", self.data.len()))?;
 
         // Length
         packet
-            .write_u16::<BigEndian>((self.data.len() + 12) as u16)
-            .unwrap();
+            .write_u16::<BigEndian>(total_len)
+            .context("failed to encode TCP packet length")?;
         // XID
-        packet.write(&[0, 0, 0, 0]).unwrap();
+        packet
+            .write_all(&[0, 0, 0, 0])
+            .context("failed to encode TCP packet xid")?;
         // APP ID
-        packet.write_i32::<BigEndian>(1).unwrap();
+        packet
+            .write_i32::<BigEndian>(1)
+            .context("failed to encode TCP packet app id")?;
         // Data
-        packet.write(self.data).unwrap();
+        packet
+            .write_all(self.data)
+            .context("failed to encode TCP packet payload")?;
 
-        return packet;
+        Ok(packet)
     }
 }
 
@@ -48,37 +64,53 @@ impl AuthorizationPacket {
 }
 
 impl Packet for AuthorizationPacket {
-    fn build(&self) -> Vec<u8> {
+    fn build(&self) -> Result<Vec<u8>> {
         let bytes_token = self.token.as_bytes();
         let bytes_user = self.user.as_bytes();
         let mut data = vec![];
+        let total_len = bytes_user
+            .len()
+            .checked_add(bytes_token.len())
+            .and_then(|len| len.checked_add(19))
+            .context("authorization packet length overflow")?;
+        let total_len =
+            u16::try_from(total_len).context("authorization packet too large for protocol")?;
         // Version
-        data.write_u8(1).unwrap();
+        data.write_u8(1)
+            .context("failed to encode authorization packet version")?;
         // Protocal
-        data.write_u8(1).unwrap();
+        data.write_u8(1)
+            .context("failed to encode authorization packet protocol")?;
         // Length
-        data.write_u16::<BigEndian>(19 + bytes_user.len() as u16 + bytes_token.len() as u16)
-            .unwrap();
+        data.write_u16::<BigEndian>(total_len)
+            .context("failed to encode authorization packet length")?;
         data.write_all(&[
             0, 0, 0, 0, // Zero
             1, 0, 0, 0, // ELK_METHOD_STUN
             1, 0, // ELK_OPT_USERNAME
         ])
-        .unwrap();
+        .context("failed to encode authorization packet header")?;
         // User
-        data.write_u8(bytes_user.len() as u8).unwrap();
-        data.write(bytes_user).unwrap();
+        data.write_u8(u8::try_from(bytes_user.len()).context("username too large for protocol")?)
+            .context("failed to encode username length")?;
+        data.write_all(bytes_user)
+            .context("failed to encode username bytes")?;
         // ELK_OPT_SESSID
-        data.write(&[2, 0]).unwrap();
+        data.write_all(&[2, 0])
+            .context("failed to encode session field tag")?;
 
         // Token
-        data.write_u8(bytes_token.len() as u8).unwrap();
-        data.write(bytes_token).unwrap();
+        data.write_u8(u8::try_from(bytes_token.len()).context("token too large for protocol")?)
+            .context("failed to encode token length")?;
+        data.write_all(bytes_token)
+            .context("failed to encode token bytes")?;
 
-        data.write_i8(-1).unwrap();
+        data.write_i8(-1)
+            .context("failed to encode authorization terminator")?;
 
-        data.flush().unwrap();
+        data.flush()
+            .context("failed to flush authorization packet buffer")?;
 
-        data
+        Ok(data)
     }
 }

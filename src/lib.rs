@@ -2,13 +2,15 @@ uniffi::setup_scaffolding!("cczuvpnproto");
 
 pub mod auth;
 pub mod bindings;
+pub mod diag;
 pub mod types;
 pub mod vpn;
 
 #[cfg(test)]
 mod test {
-    use crate::bindings;
     use crate::vpn::service::{self, start_service};
+    use crate::{bindings, diag};
+    use tracing::info;
 
     #[test]
     fn test_bindings_version() {
@@ -17,16 +19,13 @@ mod test {
 
     #[tokio::test]
     async fn test() {
+        diag::try_init_tracing("info");
         let _ = start_service("", "").await;
-        let guard = match service::PROXY_SERVER.read() {
-            Ok(inner) => inner,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        println!("available: {}", service::service_available().await);
-        println!(
-            "{}",
-            serde_json::to_string(guard.as_ref().unwrap()).unwrap()
+        info!(
+            available = service::service_available().await,
+            "service availability"
         );
-        service::send_tcp_packet(&[0]).await;
+        info!(server = ?service::proxy_server(), "proxy server snapshot");
+        let _ = service::send_tcp_packet(&[0]).await;
     }
 }

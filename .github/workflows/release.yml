@@ -1,58 +1,16 @@
-name: Nightly
+name: Release
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "15 22 * * *"
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
-env:
-  NIGHTLY_TAG: pre-release
-
 jobs:
-  prepare-release:
-    name: Prepare nightly release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set build metadata
-        shell: bash
-        run: |
-          echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> "$GITHUB_ENV"
-
-      - name: Update nightly tag
-        uses: greenhat616/update-tag@v1
-        with:
-          tag_name: ${{ env.NIGHTLY_TAG }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create release body
-        shell: bash
-        run: |
-          cat > release.txt << 'EOF'
-          ## CCZU VPN Proto Nightly Build
-
-          Release created at ${{ env.BUILDTIME }}.
-
-          Daily build of **CCZU VPN Proto** on the default branch.
-          EOF
-
-      - name: Create or update nightly release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: CCZU VPN Proto Nightly Build
-          tag_name: ${{ env.NIGHTLY_TAG }}
-          body_path: release.txt
-          prerelease: true
-          generate_release_notes: true
-
   build:
     name: Build ${{ matrix.target }}
-    needs: prepare-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -120,13 +78,12 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-${{ matrix.target }}
+          name: release-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
   generate-bindings:
     name: Generate UniFFI bindings
-    needs: prepare-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -162,12 +119,12 @@ jobs:
       - name: Upload bindings artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-bindings
+          name: release-bindings
           path: dist/cczuvpnproto-bindings-*.tar.gz
           if-no-files-found: error
 
   publish:
-    name: Publish nightly assets
+    name: Publish release assets
     needs:
       - build
       - generate-bindings
@@ -179,9 +136,8 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Upload assets to nightly release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.NIGHTLY_TAG }}
           files: release-assets/*
-          prerelease: true
+          generate_release_notes: true

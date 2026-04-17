@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
 use tokio_rustls::rustls::{
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    SignatureScheme,
+    ClientConfig, RootCertStore, SignatureScheme,
 };
 
 #[derive(Debug, Clone)]
-pub struct NoVerification;
+pub struct InsecureTlsVerifier;
 
-impl ServerCertVerifier for NoVerification {
+impl ServerCertVerifier for InsecureTlsVerifier {
     fn verify_server_cert(
         &self,
         _end_entity: &tokio_rustls::rustls::pki_types::CertificateDer<'_>,
@@ -60,4 +62,28 @@ impl ServerCertVerifier for NoVerification {
             SignatureScheme::ED448,
         ]
     }
+}
+
+fn build_root_store() -> RootCertStore {
+    // TODO: Replace this with OS-native trust store loading if the host
+    // environment expects system certificate resolution instead of the
+    // bundled Mozilla root set.
+    RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
+}
+
+pub fn build_client_config(no_verification: bool) -> Arc<ClientConfig> {
+    if no_verification {
+        return Arc::new(
+            ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(InsecureTlsVerifier))
+                .with_no_client_auth(),
+        );
+    }
+
+    Arc::new(
+        ClientConfig::builder()
+            .with_root_certificates(build_root_store())
+            .with_no_client_auth(),
+    )
 }
