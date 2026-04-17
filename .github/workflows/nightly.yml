@@ -60,16 +60,22 @@ jobs:
         include:
           - os: ubuntu-latest
             target: aarch64-linux-android
+            build_cli: false
           - os: ubuntu-latest
             target: armv7-linux-androideabi
+            build_cli: false
           - os: ubuntu-latest
             target: x86_64-linux-android
+            build_cli: false
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            build_cli: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            build_cli: true
           - os: macos-14
             target: aarch64-apple-darwin
+            build_cli: true
     steps:
       - uses: actions/checkout@v5
 
@@ -86,7 +92,12 @@ jobs:
 
       - name: Build release artifacts
         shell: bash
-        run: cargo build --release --locked --lib --target "${{ matrix.target }}"
+        run: |
+          if [[ "${{ matrix.build_cli }}" == "true" ]]; then
+            cargo build --release --locked --target "${{ matrix.target }}"
+          else
+            cargo build --release --locked --lib --target "${{ matrix.target }}"
+          fi
 
       - name: Collect release assets
         shell: bash
@@ -95,19 +106,33 @@ jobs:
           release_dir="target/${{ matrix.target }}/release"
           mkdir -p dist
 
+          copy_asset() {
+            local file="$1"
+            if [ ! -f "$file" ]; then
+              return
+            fi
+
+            local base
+            base="$(basename "$file")"
+            if [[ "$base" == *.* ]]; then
+              local stem="${base%.*}"
+              local ext="${base##*.}"
+              cp "$file" "dist/${stem}-${{ matrix.target }}.${ext}"
+            else
+              cp "$file" "dist/${base}-${{ matrix.target }}"
+            fi
+          }
+
           for file in \
             "$release_dir/libcczuvpnproto.so" \
             "$release_dir/libcczuvpnproto.a" \
             "$release_dir/libcczuvpnproto.dylib" \
             "$release_dir/cczuvpnproto.dll" \
-            "$release_dir/cczuvpnproto.lib"
+            "$release_dir/cczuvpnproto.lib" \
+            "$release_dir/cczu-vpn-proto" \
+            "$release_dir/cczu-vpn-proto.exe"
           do
-            if [ -f "$file" ]; then
-              base="$(basename "$file")"
-              stem="${base%.*}"
-              ext="${base##*.}"
-              cp "$file" "dist/${stem}-${{ matrix.target }}.${ext}"
-            fi
+            copy_asset "$file"
           done
 
           if [ -z "$(find dist -maxdepth 1 -type f -print -quit)" ]; then
