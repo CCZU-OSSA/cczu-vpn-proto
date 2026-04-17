@@ -10,18 +10,29 @@
 
 Open-source Rust reimplementation of the CCZU WebVPN tunnel client.
 
+The project currently provides both:
+
+- a Windows-oriented CLI client path for direct usage
+- a Rust library and UniFFI bindings for embedding and integration
+
 ## Features
 
 - `tun-rs` based cross-platform TUN device integration
-- Windows Wintun CLI entrypoint for local testing
+- Windows Wintun CLI client path
 - Split-tunnel route installation from WebVPN rule data
 - UniFFI exports for Kotlin, Swift, Python, and Ruby
 - `tracing` based diagnostics for both CLI and library consumers
 
 ## CLI Usage Guide
 
-The CLI entrypoint in [src/main.rs](./src/main.rs) is primarily for local and manual testing.
-At the moment, the most complete path is Windows because it configures Wintun, DNS, and split-tunnel routes automatically.
+The CLI entrypoint in [src/main.rs](./src/main.rs) can be used directly, especially on Windows.
+At the moment, Windows is the most complete path because it configures Wintun, DNS, and split-tunnel routes automatically.
+
+### Intended audience
+
+- Windows users who want to run the tunnel client directly
+- Developers validating protocol behavior against the real service
+- Integrators who want to smoke-test the native tunnel path locally
 
 ### Requirements
 
@@ -55,6 +66,7 @@ cargo run --release
 - The CLI uses the library default TLS option, which currently means `no_verification = true`.
 - Split-tunnel routes are removed on clean shutdown.
 - Packet and routing logs respect `RUST_LOG`.
+- If you are embedding this project into another application, the library API and UniFFI bindings are usually a better fit than shelling out to the CLI.
 
 ## Library Usage
 

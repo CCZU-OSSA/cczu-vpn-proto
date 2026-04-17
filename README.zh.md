@@ -10,18 +10,29 @@
 
 CCZU WebVPN 隧道客户端的 Rust 开源重实现。
 
+这个项目当前同时提供两条使用路径：
+
+- 一条面向直接使用的 Windows CLI 客户端路径
+- 一条面向嵌入式接入的 Rust 库 / UniFFI bindings 路径
+
 ## 特性
 
 - 基于 `tun-rs` 的跨平台 TUN 设备接入
-- 面向本地测试的 Windows Wintun CLI 入口
+- 面向直接使用的 Windows Wintun CLI 路径
 - 根据 WebVPN 规则数据自动安装 split-tunnel 路由
 - 通过 UniFFI 导出 Kotlin、Swift、Python、Ruby 绑定
 - 基于 `tracing` 的 CLI 与库级诊断日志
 
 ## CLI Usage Guide
 
-CLI 入口位于 [src/main.rs](./src/main.rs)，主要用于本地调试和手动联调。
+CLI 入口位于 [src/main.rs](./src/main.rs)，当前已经可以直接使用，尤其是 Windows 路径。
 目前最完整的路径是 Windows，因为它会自动配置 Wintun、DNS 和 split-tunnel 路由。
+
+### 面向对象
+
+- 想直接使用 Windows CLI 客户端的用户
+- 需要对照真实服务验证协议行为的开发者
+- 想在本机快速打通 native tunnel 链路的集成方
 
 ### 环境要求
 
@@ -55,6 +66,7 @@ cargo run --release
 - CLI 默认使用库里的 TLS 选项，也就是当前的 `no_verification = true`。
 - 正常退出时会尝试删除 split-tunnel 路由。
 - 包收发和路由安装日志都受 `RUST_LOG` 控制。
+- 如果你是把它嵌入到别的应用里，通常更适合直接使用 Rust API 或 UniFFI bindings，而不是外部调用 CLI。
 
 ## Library Usage
 

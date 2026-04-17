@@ -88,7 +88,7 @@ jobs:
 
       - name: Build release artifacts
         shell: bash
-        run: cargo build --release --locked --target "${{ matrix.target }}"
+        run: cargo build --release --locked --lib --target "${{ matrix.target }}"
 
       - name: Collect release assets
         shell: bash
@@ -138,7 +138,7 @@ jobs:
 
       - name: Build Linux cdylib for bindings generation
         shell: bash
-        run: cargo build --release --locked --features bindgen --target x86_64-unknown-linux-gnu
+        run: cargo build --release --locked --lib --features bindgen --target x86_64-unknown-linux-gnu
 
       - name: Build uniffi-bindgen tool
         shell: bash
