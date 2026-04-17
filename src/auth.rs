@@ -1,3 +1,4 @@
+use anyhow::Result;
 use cczuni::impls::{
     client::DefaultClient,
     login::sso::SSOUniversalLogin,
@@ -10,14 +11,11 @@ use cczuni::impls::{
 pub async fn authorize(
     user: impl Into<String>,
     password: impl Into<String>,
-) -> Result<Message<ElinkProxyData>, tokio::io::Error> {
+) -> Result<Message<ElinkProxyData>> {
     let client = DefaultClient::account(user, password);
     if let Some(info) = client.sso_universal_login().await? {
         Ok(client.webvpn_get_proxy_service(info.userid).await?)
     } else {
-        Err(tokio::io::Error::new(
-            std::io::ErrorKind::Other,
-            "WebVPN not avaiable",
-        ))
+        Err(anyhow::anyhow!("WebVPN not available"))
     }
 }

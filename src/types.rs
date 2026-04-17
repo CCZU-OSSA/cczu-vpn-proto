@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, uniffi::Record)]
 pub struct ProxyServer {
     pub address: String,
     pub mask: String,

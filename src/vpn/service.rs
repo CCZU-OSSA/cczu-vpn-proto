@@ -3,6 +3,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex as StandardMutex, RwLock,
     },
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -10,25 +11,33 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::Mutex,
-    task::JoinHandle,
-    time,
 };
 use tokio_rustls::{client, rustls::ClientConfig, TlsConnector};
 
-use crate::{cczu::authorize, model::ProxyServer, syncffi::RT};
+use crate::{auth::authorize, types::ProxyServer};
 
 use super::{
-    proto::{
+    protocol::{
         read::{consume_authization, try_read_packet_data},
         write::{AuthorizationPacket, Packet, TCPPacket, HEARTBEAT},
     },
-    trust::NoVerification,
+    tls::NoVerification,
 };
 
 pub static PROXY: Mutex<Option<client::TlsStream<TcpStream>>> = Mutex::const_new(None);
 pub static PROXY_SERVER: RwLock<Option<ProxyServer>> = RwLock::new(None);
 pub static POLLER: StandardMutex<Option<JoinHandle<()>>> = StandardMutex::new(None);
 pub static POLLER_SIGNAL: AtomicBool = AtomicBool::new(false);
+
+async fn send_heartbeat_if_due(last_sent: &mut Option<std::time::Instant>) {
+    let should_send = last_sent
+        .map(|instant| instant.elapsed() >= Duration::from_secs(5))
+        .unwrap_or(true);
+    if should_send {
+        send_heartbeat().await;
+        last_sent.replace(std::time::Instant::now());
+    }
+}
 
 /// true -> ok
 /// false -> failed
@@ -165,58 +174,50 @@ pub fn start_polling_packet(callback: impl Send + 'static + Fn(u32, Vec<u8>) -> 
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),
     };
+    POLLER_SIGNAL.store(true, Ordering::Relaxed);
+    let previous = guard.take();
+    drop(guard);
 
-    if guard.as_ref().is_some() && !POLLER_SIGNAL.load(Ordering::Relaxed) {
-        stop_service();
+    if let Some(handler) = previous {
+        let _ = handler.join();
     }
 
-    static HEARTBEAT_THROTTLER: AtomicBool = AtomicBool::new(false);
-    let heartbeat = || async move {
-        if !HEARTBEAT_THROTTLER.load(Ordering::Relaxed) {
-            tokio::runtime::Handle::try_current()
-                .unwrap_or(RT.handle().clone())
-                .spawn(async move {
-                    HEARTBEAT_THROTTLER.store(true, Ordering::Relaxed);
-                    time::sleep(Duration::from_secs(5)).await;
-                    send_heartbeat().await;
-                    HEARTBEAT_THROTTLER.store(false, Ordering::Relaxed);
-                });
-        }
-    };
-
-    let handler: JoinHandle<()> = tokio::runtime::Handle::try_current()
-        .unwrap_or(RT.handle().clone())
-        .spawn(async move {
-            // waiting for available
-            while POLLER_SIGNAL.load(Ordering::Relaxed) {}
+    POLLER_SIGNAL.store(false, Ordering::Relaxed);
+    let handler = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Create polling runtime failed!");
+        runtime.block_on(async move {
+            let mut last_heartbeat = None;
             loop {
-                // terminate
                 if POLLER_SIGNAL.load(Ordering::Relaxed) {
                     break;
                 }
                 let op = try_read_packet_data().await;
                 if let Ok(Some(data)) = op {
                     let len = data.len();
-
-                    // is the packet is heartbeat
                     if len != 4 && data[0] != 3 {
                         callback(len as u32, data);
                     } else {
-                        heartbeat().await;
+                        send_heartbeat_if_due(&mut last_heartbeat).await;
                     }
                 } else if let Ok(None) = op {
-                    heartbeat().await;
+                    send_heartbeat_if_due(&mut last_heartbeat).await;
                 } else if let Err(err) = op {
                     callback(0, Vec::from(err.to_string()));
                     println!("ERROR: {err}");
                     break;
                 }
             }
-
-            // restore
             POLLER_SIGNAL.store(false, Ordering::Relaxed);
         });
+    });
 
+    let mut guard = match POLLER.lock() {
+        Ok(inner) => inner,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     guard.replace(handler);
 }
 
@@ -224,10 +225,10 @@ pub fn stop_polling_packet() {
     POLLER_SIGNAL.store(true, Ordering::Relaxed);
 }
 
-pub async fn waiting_polling_packet_stop() -> Result<(), tokio::task::JoinError> {
+pub fn waiting_polling_packet_stop() -> std::thread::Result<()> {
     let mut guard = POLLER.lock().unwrap();
-    if let Some(handler) = guard.as_mut() {
-        return handler.await;
+    if let Some(handler) = guard.take() {
+        return handler.join();
     }
-    return Ok(());
+    Ok(())
 }

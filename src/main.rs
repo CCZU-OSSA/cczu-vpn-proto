@@ -3,58 +3,70 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Result;
 use cczuni::impls::services::webvpn::WebVPNService;
-use cczuvpnproto::proxy::service;
+use cczuvpnproto::vpn::service;
+use tun_rs::DeviceBuilder;
 
-async fn create_device() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+#[cfg(target_os = "windows")]
+fn ensure_wintun_dll() -> std::io::Result<()> {
+    let dll_path = std::path::Path::new("wintun.dll");
+    if !dll_path.exists() {
+        println!("Create wintun.dll...");
+        std::fs::write(dll_path, include_bytes!("../wintun.dll"))?;
+    }
+    Ok(())
+}
+
+async fn create_device() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        use std::{fs::File, io::Write};
-        use std::{net::IpAddr, str::FromStr, sync::Arc};
-        let dll = include_bytes!("../wintun.dll");
-        if !exists("wintun.dll").unwrap_or(false) {
-            println!("Create wintun.dll...");
-            let mut out = File::create("wintun.dll").unwrap();
-            out.write(dll).unwrap();
-        }
+        ensure_wintun_dll()?;
     }
     let guard = match service::PROXY_SERVER.read() {
         Ok(inner) => inner,
         Err(poisoned) => poisoned.into_inner(),
     };
-    let info = guard.as_ref();
-    if info.is_none() {
-        panic!("No server to create TUN Device");
+    let server = guard
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| std::io::Error::other("No server to create TUN device"))?;
+    println!("server {}", serde_json::to_string(&server)?);
+
+    let mut builder = DeviceBuilder::new().name("CCZU-VPN-PROTO").ipv4(
+        server.address.as_str(),
+        server.mask.as_str(),
+        None,
+    );
+
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder
+            .description("CCZU-VPN-PROTO")
+            .wintun_file(String::from("wintun.dll"));
     }
-    let server = info.unwrap().clone();
-    println!("server {}", serde_json::to_string(&server).unwrap());
-    let mut config = tun::Configuration::default();
-    config
-        .address(server.address)
-        .netmask(server.mask)
-        .tun_name("CCZU-VPN-PROTO")
-        .up();
-    config.platform_config(|config| {
-        #[cfg(target_os = "windows")]
-        {
-            config.dns_servers(&[IpAddr::from_str(&server.dns).unwrap()]);
-        }
-        #[cfg(target_os = "linux")]
-        {
-            config.ensure_root_privileges(true);
-        }
-    });
-    let device = Arc::new(tun::create(&config)?);
+
+    let device = builder.build_sync()?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let dns_server = server.dns.parse::<std::net::IpAddr>()?;
+        device.set_dns_servers(&[dns_server])?;
+    }
+
+    let device = Arc::new(device);
     let device_output = device.clone();
 
     service::start_polling_packet(move |a, b| {
         println!("rev datasize: {a}");
-        device_output.send(&b).unwrap();
+        if let Err(err) = device_output.send(&b) {
+            panic!("Failed to write packet to TUN device: {err}");
+        }
     });
 
     let mut buf = [0; 65535];
     loop {
-        let len = device.recv(&mut buf).unwrap();
+        let len = device.recv(&mut buf)?;
         println!("send datasize {len}");
         if !service::send_tcp_packet(&mut buf[..len]).await {
             println!("packet send failed");

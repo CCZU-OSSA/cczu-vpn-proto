@@ -1,16 +1,18 @@
-pub mod cczu;
-pub mod model;
-pub mod proxy;
-pub mod syncffi;
+uniffi::setup_scaffolding!("cczuvpnproto");
+
+pub mod auth;
+pub mod bindings;
+pub mod types;
+pub mod vpn;
 
 #[cfg(test)]
 mod test {
-    use crate::proxy::service::{self, start_service};
-    use crate::syncffi;
+    use crate::bindings;
+    use crate::vpn::service::{self, start_service};
 
     #[test]
-    fn test_syncffi() {
-        println!("{}", syncffi::service_available());
+    fn test_bindings_version() {
+        assert_eq!(bindings::version(), concat!("v", env!("CARGO_PKG_VERSION")));
     }
 
     #[tokio::test]
