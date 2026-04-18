@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use tokio_rustls::rustls::{
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     ClientConfig, RootCertStore, SignatureScheme,
+    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
 };
 
 #[derive(Debug, Clone)]

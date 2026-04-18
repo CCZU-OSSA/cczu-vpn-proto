@@ -1,4 +1,4 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use tokio::io::AsyncReadExt;
 
 use crate::types::ProxyServer;

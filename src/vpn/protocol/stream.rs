@@ -1,7 +1,7 @@
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use tokio::io::{AsyncReadExt, ReadHalf};
 use tokio::net::TcpStream;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tokio_rustls::client;
 
 pub const INBOUND_FRAME_HEADER_LEN: usize = 8;

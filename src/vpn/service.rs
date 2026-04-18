@@ -1,18 +1,18 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex as StandardMutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use cczuni::impls::services::webvpn_type::ElinkProxyData;
 use tokio::{
-    io::{split, AsyncWriteExt, WriteHalf},
+    io::{AsyncWriteExt, WriteHalf, split},
     net::TcpStream,
-    sync::{broadcast, mpsc, oneshot, Mutex},
+    sync::{Mutex, broadcast, mpsc, oneshot},
     task::JoinHandle as TokioJoinHandle,
     time,
 };
@@ -28,7 +28,7 @@ use super::{
     protocol::{
         read::consume_authization,
         stream::{InboundFrame, PacketStreamReader, ProxyStream},
-        write::{AuthorizationPacket, Packet, TCPPacket, HEARTBEAT},
+        write::{AuthorizationPacket, HEARTBEAT, Packet, TCPPacket},
     },
     tls::build_client_config,
 };
