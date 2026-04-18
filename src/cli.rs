@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use cczuni::impls::services::webvpn::WebVPNService;
 use cczuvpnproto::{diag, vpn::service};
 use clap::Parser;
+use rpassword::prompt_password;
 use tracing::{debug, error, info, warn};
 use tun_rs::{DeviceBuilder, InterruptEvent};
 
@@ -47,6 +48,20 @@ fn read_required_prompt(prompt: &str) -> Result<String> {
     }
 }
 
+fn read_password_prompt(prompt: &str) -> Result<String> {
+    prompt_password(prompt).context("failed to read password input")
+}
+
+fn read_required_password_prompt(prompt: &str) -> Result<String> {
+    loop {
+        let value = read_password_prompt(prompt)?;
+        if !value.is_empty() {
+            return Ok(value);
+        }
+        warn!(prompt, "received empty password, asking again");
+    }
+}
+
 fn resolve_credentials(args: &CliArgs) -> Result<(String, String)> {
     let user = match &args.user {
         Some(user) if !user.trim().is_empty() => user.trim().to_string(),
@@ -55,7 +70,7 @@ fn resolve_credentials(args: &CliArgs) -> Result<(String, String)> {
 
     let password = match &args.password {
         Some(password) if !password.trim().is_empty() => password.trim().to_string(),
-        _ => read_required_prompt("密码: ")?,
+        _ => read_required_password_prompt("密码（输入已隐藏）: ")?,
     };
 
     Ok((user, password))
@@ -105,7 +120,7 @@ fn normalize_network(
 }
 
 #[cfg(target_os = "windows")]
-fn parse_split_tunnel_route(route: &str) -> Result<WindowsRoute> {
+fn parse_split_tunnel_route(route: &str) -> Result<Option<WindowsRoute>> {
     let trimmed = route.trim();
     if trimmed.is_empty() {
         bail!("received an empty split-tunnel route");
@@ -132,9 +147,13 @@ fn parse_split_tunnel_route(route: &str) -> Result<WindowsRoute> {
 
     let (address, netmask) = match route_target.split_once('/') {
         Some((address, suffix)) => {
-            let address = address
-                .parse::<std::net::Ipv4Addr>()
-                .with_context(|| format!("invalid split-tunnel IPv4 address: {route_target}"))?;
+            let address = match address.parse::<std::net::IpAddr>() {
+                Ok(std::net::IpAddr::V4(address)) => address,
+                Ok(std::net::IpAddr::V6(_)) => return Ok(None),
+                Err(_) => {
+                    bail!("invalid split-tunnel IP address: {route_target}");
+                }
+            };
             let netmask = match suffix.parse::<u8>() {
                 Ok(prefix) => prefix_to_netmask(prefix)?,
                 Err(_) => suffix.parse::<std::net::Ipv4Addr>().with_context(|| {
@@ -143,18 +162,22 @@ fn parse_split_tunnel_route(route: &str) -> Result<WindowsRoute> {
             };
             (address, netmask)
         }
-        None => (
-            route_target
-                .parse::<std::net::Ipv4Addr>()
-                .with_context(|| format!("invalid split-tunnel IPv4 host route: {route_target}"))?,
-            std::net::Ipv4Addr::new(255, 255, 255, 255),
-        ),
+        None => {
+            let address = match route_target.parse::<std::net::IpAddr>() {
+                Ok(std::net::IpAddr::V4(address)) => address,
+                Ok(std::net::IpAddr::V6(_)) => return Ok(None),
+                Err(_) => {
+                    bail!("invalid split-tunnel IP host route: {route_target}");
+                }
+            };
+            (address, std::net::Ipv4Addr::new(255, 255, 255, 255))
+        }
     };
 
-    Ok(WindowsRoute {
+    Ok(Some(WindowsRoute {
         destination: normalize_network(address, netmask),
         netmask,
-    })
+    }))
 }
 
 #[cfg(target_os = "windows")]
@@ -267,14 +290,31 @@ fn configure_split_tunnel_routes(
             .with_context(|| format!("invalid VPN mask: {}", server.mask))?,
     };
 
-    let mut routes: Vec<WindowsRoute> = server
-        .split_tunnel_routes
-        .iter()
-        .map(|route| parse_split_tunnel_route(route))
-        .collect::<Result<Vec<WindowsRoute>>>()?;
+    let mut routes = Vec::new();
+    let mut skipped_route_count = 0usize;
+    for route in &server.split_tunnel_routes {
+        match parse_split_tunnel_route(route)? {
+            Some(route) => routes.push(route),
+            None => {
+                skipped_route_count += 1;
+                warn!(
+                    rule = route,
+                    "skipping unsupported non-IPv4 split-tunnel rule"
+                );
+            }
+        }
+    }
+
     routes.retain(|route| route != &local_route);
     routes.sort();
     routes.dedup();
+
+    if skipped_route_count > 0 {
+        warn!(
+            skipped_route_count,
+            "skipped unsupported split-tunnel rules while configuring Windows routes"
+        );
+    }
 
     let mut installed_routes = Vec::new();
     for route in &routes {

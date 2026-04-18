@@ -38,6 +38,7 @@ type PacketBroadcastSender = broadcast::Sender<Vec<u8>>;
 type PacketQueueSender = mpsc::Sender<Vec<u8>>;
 type PacketQueueReceiver = mpsc::Receiver<Vec<u8>>;
 type PacketQueueHandle = Arc<Mutex<PacketQueueReceiver>>;
+type PacketQueueEnabled = Arc<AtomicBool>;
 type StartCancelSignal = Arc<AtomicBool>;
 
 pub static POLLER: StandardMutex<Option<JoinHandle<()>>> = StandardMutex::new(None);
@@ -77,6 +78,7 @@ struct SessionHandle {
     server: ProxyServer,
     command_tx: mpsc::Sender<SessionCommand>,
     packet_rx: PacketQueueHandle,
+    packet_queue_enabled: PacketQueueEnabled,
     packet_tx: PacketBroadcastSender,
     task: TokioJoinHandle<Result<()>>,
 }
@@ -166,9 +168,12 @@ async fn run_session_actor(
     mut writer: ProxyWriteHalf,
     mut command_rx: mpsc::Receiver<SessionCommand>,
     packet_queue_tx: PacketQueueSender,
+    packet_queue_enabled: PacketQueueEnabled,
     packet_tx: broadcast::Sender<Vec<u8>>,
 ) -> Result<()> {
     let mut last_heartbeat = None;
+    let mut last_packet_queue_warning = None;
+    let mut dropped_packet_count = 0u64;
     let actor_result = async {
         loop {
             tokio::select! {
@@ -211,16 +216,30 @@ async fn run_session_actor(
                 frame = reader.try_read_frame() => {
                     match frame? {
                         Some(InboundFrame::Data { payload, .. }) => {
-                            match packet_queue_tx.try_send(payload.clone()) {
-                                Ok(()) => {}
-                                Err(mpsc::error::TrySendError::Full(_)) => {
-                                    warn!(
-                                        session_id,
-                                        packet_size = payload.len(),
-                                        "packet queue is full, dropping inbound packet"
-                                    );
+                            if packet_queue_enabled.load(Ordering::Relaxed) {
+                                match packet_queue_tx.try_send(payload.clone()) {
+                                    Ok(()) => {}
+                                    Err(mpsc::error::TrySendError::Full(_)) => {
+                                        dropped_packet_count += 1;
+                                        let should_warn = last_packet_queue_warning
+                                            .map(|instant: Instant| instant.elapsed() >= Duration::from_secs(5))
+                                            .unwrap_or(true);
+                                        if should_warn {
+                                            warn!(
+                                                session_id,
+                                                dropped_packets = dropped_packet_count,
+                                                packet_queue_capacity = PACKET_QUEUE_CAPACITY,
+                                                last_packet_size = payload.len(),
+                                                "packet queue is full, dropping inbound packets"
+                                            );
+                                            dropped_packet_count = 0;
+                                            last_packet_queue_warning.replace(Instant::now());
+                                        }
+                                    }
+                                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                                        packet_queue_enabled.store(false, Ordering::Relaxed);
+                                    }
                                 }
-                                Err(mpsc::error::TrySendError::Closed(_)) => {}
                             }
                             let _ = packet_tx.send(payload);
                         }
@@ -324,6 +343,7 @@ pub async fn start_service_with_options(
         let (reader_half, writer_half) = split(io);
         let (command_tx, command_rx) = mpsc::channel(32);
         let (packet_queue_tx, packet_queue_rx) = mpsc::channel(PACKET_QUEUE_CAPACITY);
+        let packet_queue_enabled = Arc::new(AtomicBool::new(false));
         let (packet_tx, _) = broadcast::channel(POLLER_BROADCAST_CAPACITY);
 
         let task = tokio::spawn(run_session_actor(
@@ -332,6 +352,7 @@ pub async fn start_service_with_options(
             writer_half,
             command_rx,
             packet_queue_tx,
+            packet_queue_enabled.clone(),
             packet_tx.clone(),
         ));
 
@@ -340,6 +361,7 @@ pub async fn start_service_with_options(
             server: proxy,
             command_tx,
             packet_rx: Arc::new(Mutex::new(packet_queue_rx)),
+            packet_queue_enabled,
             packet_tx,
             task,
         })
@@ -416,15 +438,19 @@ pub async fn stop_service() -> Result<()> {
 }
 
 pub async fn receive_packet(_size: u32) -> Result<Vec<u8>> {
-    let packet_rx: PacketQueueHandle = {
+    let (packet_rx, packet_queue_enabled): (PacketQueueHandle, PacketQueueEnabled) = {
         let guard = lock_session()?;
         match guard.as_ref() {
-            Some(SessionSlot::Running(handle)) => handle.packet_rx.clone(),
+            Some(SessionSlot::Running(handle)) => (
+                handle.packet_rx.clone(),
+                handle.packet_queue_enabled.clone(),
+            ),
             Some(SessionSlot::Starting(_)) => bail!("service is still starting"),
             None => bail!("service is not running"),
         }
     };
 
+    packet_queue_enabled.store(true, Ordering::Relaxed);
     let mut rx_guard: tokio::sync::MutexGuard<'_, PacketQueueReceiver> = packet_rx.lock().await;
     rx_guard.recv().await.context("session packet queue closed")
 }
