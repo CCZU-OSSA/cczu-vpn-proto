@@ -118,7 +118,7 @@ jobs:
 
       - name: Build Linux cdylib for bindings generation
         shell: bash
-        run: cargo build --release --locked --lib --features bindgen --target x86_64-unknown-linux-gnu
+        run: cargo build --locked --lib --features bindgen --target x86_64-unknown-linux-gnu
 
       - name: Build uniffi-bindgen tool
         shell: bash
@@ -128,7 +128,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          library_path="target/x86_64-unknown-linux-gnu/release/libcczuvpnproto.so"
+          # UniFFI reads metadata from ELF symbols, so a stripped release library can look empty.
+          library_path="target/x86_64-unknown-linux-gnu/debug/libcczuvpnproto.so"
           mkdir -p bindings dist
 
           for language in kotlin swift python ruby
